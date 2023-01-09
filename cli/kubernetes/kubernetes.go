@@ -61,6 +61,11 @@ func (k *Client) CreatePodShell(ctx context.Context, namespace, podName string, 
 	return k.Client.CreatePodShell(ctx, namespace, podName, channel, channel, channel, resizeQueue, tty)
 }
 
+// CreatePodPortForward creates a port forward on the specified pod.
+func (k *Client) CreatePodPortForward(ctx context.Context, namespace, podName, port string) (chan<- struct{}, error) {
+	return k.Client.CreatePodPortForward(ctx, namespace, podName, port)
+}
+
 // CreatePersistentVolume creates a shell on the specified pod.
 func (k *Client) CreatePersistentVolume(ctx context.Context, namespace, volumeName string) error {
 	/* 	if err := exec.Command("kubectl", "apply", "-f", "secret.yaml").Run(); err != nil {

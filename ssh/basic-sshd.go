@@ -130,6 +130,9 @@ func (s *sshRelay) StartServer(ctx context.Context) {
 		}
 	}(ctx)
 	<-ctx.Done()
+	if err := listener.Close(); err != nil {
+		s.log.Error("failed to close listener", zap.Error(err))
+	}
 	done <- struct{}{}
 	s.handleConnWG.Wait()
 }
@@ -279,6 +282,11 @@ func (s *sshRelay) handleChannelTypeDirectTCPIP(ctx context.Context, wg *sync.Wa
 		s.log.Error("could not accept the channel", zap.Error(err))
 		return
 	}
+	_, err = s.client.CreatePodPortForward(ctx, namespace, fmt.Sprintf("%s-statefulset-0", userID), fmt.Sprint(payload.ConnectedPort))
+	if err != nil {
+		s.log.Error("could not create port forward", zap.Error(err))
+		return
+	}
 	defer func(log *zap.Logger) {
 		err := channel.Close()
 		if err != nil {
@@ -286,6 +294,7 @@ func (s *sshRelay) handleChannelTypeDirectTCPIP(ctx context.Context, wg *sync.Wa
 		}
 		log.Debug("closed \"DirectTCPIP\" channel")
 	}(s.log)
+	// stopChan <- struct{}{}
 }
 
 func (s *sshRelay) keepAlive(cancel context.CancelFunc, sshConn *ssh.ServerConn, done <-chan struct{}) {
