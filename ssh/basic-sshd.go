@@ -227,15 +227,21 @@ func (s *sshRelay) handleChannel(ctx context.Context, wg *sync.WaitGroup, newCha
 	// channel type of "session". The also describes
 	// "x11", "direct-tcpip" and "forwarded-tcpip"
 	// channel types.
-	if t := newChannel.ChannelType(); t != "session" {
+	switch newChannel.ChannelType() {
+	case "session":
+		s.handleChannelTypeSession(ctx, wg, newChannel, namespace, userID)
+	case "direct-tcpip":
+		s.handleChannelTypeDirectTCPIP(ctx, wg, newChannel, namespace, userID)
+	default:
 		s.log.Error("unknown channel type", zap.String("type", newChannel.ChannelType()))
-		err := newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", t))
+		err := newChannel.Reject(ssh.UnknownChannelType, fmt.Sprintf("unknown channel type: %s", newChannel.ChannelType()))
 		if err != nil {
 			s.log.Error("failed to reject channel", zap.Error(err))
 		}
-		return
 	}
+}
 
+func (s *sshRelay) handleChannelTypeSession(ctx context.Context, wg *sync.WaitGroup, newChannel ssh.NewChannel, namespace, userID string) {
 	// At this point, we have the opportunity to reject the client's
 	// request for another logical channel
 	channel, requests, err := newChannel.Accept()
@@ -253,6 +259,33 @@ func (s *sshRelay) handleChannel(ctx context.Context, wg *sync.WaitGroup, newCha
 
 	channelStruct := NewSSHChannelServer(channel, s.client, s.log, requests, namespace, userID)
 	channelStruct.Serve(ctx)
+}
+
+func (s *sshRelay) handleChannelTypeDirectTCPIP(ctx context.Context, wg *sync.WaitGroup, newChannel ssh.NewChannel, namespace, userID string) {
+	var payload ForwardTCPChannelOpenPayload
+	err := ssh.Unmarshal(newChannel.ExtraData(), &payload)
+	if err != nil {
+		s.log.Error("could not unmarshal payload", zap.Error(err))
+		err := newChannel.Reject(ssh.ConnectionFailed, fmt.Sprintf("could not unmarshel extradata in channel: %s", newChannel.ChannelType()))
+		if err != nil {
+			s.log.Error("failed to reject channel", zap.Error(err))
+		}
+		return
+	}
+	s.log.Debug("payload", zap.Any("payload", payload))
+
+	channel, _, err := newChannel.Accept()
+	if err != nil {
+		s.log.Error("could not accept the channel", zap.Error(err))
+		return
+	}
+	defer func(log *zap.Logger) {
+		err := channel.Close()
+		if err != nil {
+			log.Error("closing connection", zap.Error(err))
+		}
+		log.Debug("closed \"DirectTCPIP\" channel")
+	}(s.log)
 }
 
 func (s *sshRelay) keepAlive(cancel context.CancelFunc, sshConn *ssh.ServerConn, done <-chan struct{}) {

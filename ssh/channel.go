@@ -78,6 +78,13 @@ func (s *SSHChannelServer) Serve(ctx context.Context) {
 				}
 			case "window-change":
 				s.window.Queue <- parseDims(req.Payload)
+			default:
+				if req.WantReply {
+					if err := req.Reply(false, nil); err != nil {
+						s.log.Error("failled to respond to request", zap.Any("request", req), zap.Error(err))
+					}
+				}
+				s.log.Info("unimplemented request", zap.Any("request", req))
 			}
 		}
 	}
