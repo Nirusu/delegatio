@@ -57,8 +57,8 @@ func (k *Client) CreateAndWaitForRessources(ctx context.Context, namespace, user
 }
 
 // CreatePodShell creates a shell on the specified pod.
-func (k *Client) CreatePodShell(ctx context.Context, namespace, podName string, stdin io.Reader, stdout io.Writer, stderr io.Writer, resizeQueue remotecommand.TerminalSizeQueue) error {
-	return k.Client.CreatePodShell(ctx, namespace, podName, stdin, stdout, stderr, resizeQueue)
+func (k *Client) CreatePodShell(ctx context.Context, namespace, podName string, stdin io.Reader, stdout io.Writer, stderr io.Writer, resizeQueue remotecommand.TerminalSizeQueue, tty bool) error {
+	return k.Client.CreatePodShell(ctx, namespace, podName, stdin, stdout, stderr, resizeQueue, tty)
 }
 
 // CreatePersistentVolume creates a shell on the specified pod.

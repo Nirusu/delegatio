@@ -208,10 +208,11 @@ func (s *sshRelay) handleChannels(ctx context.Context, chans <-chan ssh.NewChann
 		select {
 		case <-ctx.Done():
 			return
-		case newChannel := <-chans:
+		case newChannel, ok := <-chans:
 			// when we close the "channel" from newChannel.Accept() in s.handleChannel the ssh.NewChannel
-			// is closed from the library side as well. Thus it will always send nil. Return in this case.
-			if newChannel == nil {
+			// is closed from the library side as well.
+			if !ok {
+				s.log.Debug("channel closed")
 				return
 			}
 			handleChannelWg.Add(1)
@@ -273,6 +274,12 @@ func (s *sshRelay) handleChannel(ctx context.Context, wg *sync.WaitGroup, newCha
 				}
 			case "pty-req":
 				termLen := req.Payload[3]
+				ptyReq := PtyRequestPayload{}
+				if err := ssh.Unmarshal(req.Payload, &ptyReq); err != nil {
+					s.log.Error("failled to unmarshal pty request", zap.Error(err))
+					continue
+				}
+				s.log.Info("pty request", zap.Any("ptyReq", ptyReq))
 				window.Queue <- parseDims(req.Payload[termLen+4:])
 				// Responding true (OK) here will let the client
 				// know we have a pty ready for input
@@ -291,7 +298,9 @@ func (s *sshRelay) handleChannel(ctx context.Context, wg *sync.WaitGroup, newCha
 		channel,
 		channel,
 		channel,
-		window)
+		window,
+		true,
+	)
 	if err != nil {
 		s.log.Error("createPodShell exited with errorcode", zap.Error(err))
 		_, _ = channel.Write([]byte(fmt.Sprintf("closing connection, reason: %v", err)))
