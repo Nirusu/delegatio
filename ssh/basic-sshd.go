@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -22,7 +21,6 @@ import (
 	"github.com/benschlueter/delegatio/cli/kubernetes"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
-	"k8s.io/client-go/tools/remotecommand"
 )
 
 // TODO: Add support for multiple users (i.e. network storage for sshRelay.users / sshRelay.publicKeys)
@@ -253,80 +251,8 @@ func (s *sshRelay) handleChannel(ctx context.Context, wg *sync.WaitGroup, newCha
 		log.Debug("closed channel connection")
 	}(s.log)
 
-	window := &Winsize{
-		Queue: make(chan *remotecommand.TerminalSize),
-	}
-
-	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
-	go func(<-chan *ssh.Request) {
-		for req := range requests {
-			s.log.Debug("received data over request channel", zap.Any("req", req))
-			switch req.Type {
-			case "shell":
-				// We only accept the default shell
-				// (i.e. no command in the Payload)
-				if len(req.Payload) != 0 {
-					s.log.Error("failled to respond to \"shell\" request", zap.Error(err))
-					continue
-				}
-				if err := req.Reply(true, nil); err != nil {
-					s.log.Error("failled to respond to \"shell\" request", zap.Error(err))
-				}
-			case "pty-req":
-				termLen := req.Payload[3]
-				ptyReq := PtyRequestPayload{}
-				if err := ssh.Unmarshal(req.Payload, &ptyReq); err != nil {
-					s.log.Error("failled to unmarshal pty request", zap.Error(err))
-					continue
-				}
-				s.log.Info("pty request", zap.Any("ptyReq", ptyReq))
-				window.Queue <- parseDims(req.Payload[termLen+4:])
-				// Responding true (OK) here will let the client
-				// know we have a pty ready for input
-				if err := req.Reply(true, nil); err != nil {
-					s.log.Error("failled to respond to \"pty-req\" request", zap.Error(err))
-				}
-			case "window-change":
-				window.Queue <- parseDims(req.Payload)
-			}
-		}
-	}(requests)
-	// Fire up "kubectl exec" for this session
-	err = s.client.CreatePodShell(ctx,
-		namespace,
-		fmt.Sprintf("%s-statefulset-0", userID),
-		channel,
-		channel,
-		channel,
-		window,
-		true,
-	)
-	if err != nil {
-		s.log.Error("createPodShell exited with errorcode", zap.Error(err))
-		_, _ = channel.Write([]byte(fmt.Sprintf("closing connection, reason: %v", err)))
-		return
-	}
-	_, _ = channel.Write([]byte("graceful termination"))
-}
-
-// parseDims extracts terminal dimensions (width x height) from the provided buffer.
-func parseDims(b []byte) *remotecommand.TerminalSize {
-	w := binary.BigEndian.Uint32(b)
-	h := binary.BigEndian.Uint32(b[4:])
-	return &remotecommand.TerminalSize{
-		Width:  uint16(w),
-		Height: uint16(h),
-	}
-}
-
-// Winsize stores the Height and Width of a terminal.
-type Winsize struct {
-	Queue chan *remotecommand.TerminalSize
-}
-
-// Next sets the size.
-func (w *Winsize) Next() *remotecommand.TerminalSize {
-	return <-w.Queue
+	channelStruct := NewSSHChannelServer(channel, s.client, s.log, requests, namespace, userID)
+	channelStruct.Serve(ctx)
 }
 
 func (s *sshRelay) keepAlive(cancel context.CancelFunc, sshConn *ssh.ServerConn, done <-chan struct{}) {
